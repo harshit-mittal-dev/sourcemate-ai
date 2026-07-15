@@ -1,0 +1,1 @@
+DBMS is a database management system. It helps users store, organize, update, and retrieve data efficiently. 
