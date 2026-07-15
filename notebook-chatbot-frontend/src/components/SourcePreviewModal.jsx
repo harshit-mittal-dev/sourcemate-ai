@@ -1,21 +1,19 @@
-function getSourceIcon(type) {
-  if (type === "PDF") return "📄";
-  if (type === "DOCX") return "📘";
-  if (type === "LINK") return "🔗";
-  if (type === "TEXT") return "🗒️";
-  return "📁";
-}
-
 function SourcePreviewModal({ source, onClose }) {
   if (!source) return null;
 
+  const chunks = source.chunks || [];
+
   return (
     <div className="modalOverlay">
-      <div className="sourceModal">
+      <div className="uploadModal">
         <div className="modalHeader">
           <div>
-            <h2>Source Preview</h2>
-            <p>Details of your uploaded source</p>
+            <h2>{source.name}</h2>
+            <p>
+              {source.type} • {source.pages || 1} page
+              {(source.pages || 1) === 1 ? "" : "s"} •{" "}
+              {source.totalChunks || chunks.length || 0} chunks
+            </p>
           </div>
 
           <button className="closeButton" onClick={onClose}>
@@ -23,53 +21,31 @@ function SourcePreviewModal({ source, onClose }) {
           </button>
         </div>
 
-        <div className="previewIcon">{getSourceIcon(source.type)}</div>
-
-        <div className="sourceDetails">
-          <div>
-            <span>File Name</span>
-            <strong>{source.name}</strong>
-          </div>
-
-          <div>
-            <span>Type</span>
-            <strong>{source.type}</strong>
-          </div>
-
-          <div>
-            <span>Pages</span>
-            <strong>{source.pages}</strong>
-          </div>
-
-          <div>
-            <span>Status</span>
-            <strong>{source.status}</strong>
-          </div>
-
-          <div>
-            <span>Selected for Chat</span>
-            <strong>{source.selected ? "Yes" : "No"}</strong>
-          </div>
-
-          {source.url && (
-            <div>
-              <span>Link</span>
-              <strong>{source.url}</strong>
-            </div>
-          )}
-
-          {source.preview && (
-            <div>
-              <span>Preview</span>
-              <strong>{source.preview}</strong>
-            </div>
-          )}
-        </div>
-
         <div className="modalNote">
-          In the backend version, this section can show extracted text, page
-          preview, document chunks, and source citations.
+          <strong>Status:</strong> {source.status}
         </div>
+
+        {source.textPreview && (
+          <div className="manualSourceBox">
+            <label>Text Preview</label>
+            <p>{source.textPreview}</p>
+          </div>
+        )}
+
+        {chunks.length > 0 && (
+          <div className="manualSourceBox">
+            <label>Backend Chunks</label>
+
+            {chunks.slice(0, 5).map((chunk) => (
+              <div className="sourceTip" key={chunk.id}>
+                <strong>
+                  Chunk {chunk.chunkIndex + 1} • Page {chunk.pageNumber}
+                </strong>
+                <p>{chunk.text}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

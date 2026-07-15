@@ -4,6 +4,7 @@ function Topbar({
   activeNotebook,
   handleBackToDashboard,
   handleExportNotes,
+  handleShareProject,
 }) {
   return (
     <header className="topbar">
@@ -31,7 +32,9 @@ function Topbar({
           Export
         </button>
 
-        <button className="ghostButton">Share</button>
+        <button className="ghostButton" onClick={handleShareProject}>
+          Share
+        </button>
 
         <button
           className="themeButton"

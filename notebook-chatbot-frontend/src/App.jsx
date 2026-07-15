@@ -1,406 +1,476 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
+
 import Topbar from "./components/Topbar";
 import Dashboard from "./components/Dashboard";
 import SourcesPanel from "./components/SourcesPanel";
 import ChatPanel from "./components/ChatPanel";
 import ToolsPanel from "./components/ToolsPanel";
-import SourcePreviewModal from "./components/SourcePreviewModal";
 import UploadModal from "./components/UploadModal";
+import SourcePreviewModal from "./components/SourcePreviewModal";
 
-const initialSources = [
-  {
-    id: 1,
-    name: "Machine_Learning_Notes.pdf",
-    type: "PDF",
-    pages: 24,
-    status: "Ready",
-    selected: true,
-  },
-  {
-    id: 2,
-    name: "Project_Concept_Note.docx",
-    type: "DOCX",
-    pages: 8,
-    status: "Ready",
-    selected: true,
-  },
-  {
-    id: 3,
-    name: "Class Summary Notes",
-    type: "TEXT",
-    pages: 5,
-    status: "Ready",
-    selected: false,
-  },
-];
+import {
+  getSources,
+  getSourceById,
+  uploadSourceFile,
+  uploadTextSource,
+  uploadLinkSource,
+  deleteSourceById,
+  streamChatWithSources,
+} from "./services/api";
 
-const starterMessages = [
+function createId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+
+function formatSourceStatus(source) {
+  if (source.processingStatus === "completed") return "Processed";
+  if (source.processingStatus === "failed") return "Failed";
+  if (source.processingStatus === "pending_extraction") return "Pending";
+  return source.status || "Uploaded";
+}
+
+function mapBackendSourceToUi(source, selected = true) {
+  return {
+    id: source.id,
+    name: source.name,
+    type: source.type,
+    pages: source.pages || 1,
+    status: formatSourceStatus(source),
+    processingStatus: source.processingStatus,
+    selected,
+    sizeReadable: source.sizeReadable,
+    totalCharacters: source.totalCharacters || 0,
+    totalChunks: source.totalChunks || 0,
+    textPreview: source.textPreview || "",
+    url: source.url || null,
+    createdAt: source.createdAt,
+    updatedAt: source.updatedAt,
+  };
+}
+
+const initialNotebooks = [
   {
-    id: 1,
-    role: "assistant",
-    text: "Hey! Upload your PDFs, notes, or project documents and ask me anything from them. I’ll answer like a source-based AI assistant.",
-    citations: [],
+    id: "notebook_1",
+    name: "SourceMate Workspace",
+    type: "AI Research Notebook",
+    sources: 0,
+    updated: "Today",
   },
 ];
 
 const suggestedPrompts = [
-  "Summarize all sources",
-  "Create exam questions",
-  "Explain this simply",
-  "Find key definitions",
+  "Summarize my selected sources",
+  "Explain this in simple words",
+  "Make short exam notes",
+  "Create important questions",
 ];
 
-const studyTools = [
-  {
-    title: "Generate Summary",
-    icon: "📝",
-    description: "Create a clean summary from selected sources.",
-  },
-  {
-    title: "Create Quiz",
-    icon: "❓",
-    description: "Generate MCQs and short answers.",
-  },
-  {
-    title: "Make Flashcards",
-    icon: "🧠",
-    description: "Turn concepts into revision cards.",
-  },
-  {
-    title: "Extract Key Terms",
-    icon: "🔎",
-    description: "Find important terms and meanings.",
-  },
-];
-
-const initialNotebooks = [
-  {
-    id: 1,
-    name: "Machine Learning Notes",
-    type: "Study Notes",
-    sources: 3,
-    updated: "Today",
-  },
-  {
-    id: 2,
-    name: "AI Project Research",
-    type: "Project Research",
-    sources: 2,
-    updated: "Yesterday",
-  },
-  {
-    id: 3,
-    name: "DBMS Exam Prep",
-    type: "Exam Revision",
-    sources: 5,
-    updated: "2 days ago",
-  },
-];
+const welcomeMessage = {
+  id: "welcome_message",
+  role: "assistant",
+  text: "Upload a source, paste notes, or add a link. Then ask me anything from it. I will stream the backend response progressively and return citations from your uploaded chunks.",
+  citations: [],
+};
 
 function App() {
+  const [darkMode, setDarkMode] = useState(false);
   const [notebooks, setNotebooks] = useState(initialNotebooks);
   const [activeNotebook, setActiveNotebook] = useState(null);
 
-  const [sources, setSources] = useState(initialSources);
-  const [messages, setMessages] = useState(starterMessages);
-  const [input, setInput] = useState("");
-  const [darkMode, setDarkMode] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [previewSource, setPreviewSource] = useState(null);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [sources, setSources] = useState([]);
+  const [selectedSource, setSelectedSource] = useState(null);
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  const [savedNotes, setSavedNotes] = useState([
-    "Workspace created",
-    "Selected sources will be used for answers",
-  ]);
+  const [messages, setMessages] = useState([welcomeMessage]);
+  const [input, setInput] = useState("");
+  const [savedNotes, setSavedNotes] = useState([]);
+
+  const [isLoading, setIsLoading] = useState(false);
 
   const selectedSources = sources.filter((source) => source.selected);
 
-  function handleOpenNotebook(notebook) {
-    setActiveNotebook(notebook);
+  async function loadSourcesFromBackend() {
+    try {
+      const data = await getSources();
+
+      const previousSelectionMap = new Map(
+        sources.map((source) => [source.id, source.selected])
+      );
+
+      const backendSources = (data.sources || []).map((source) =>
+        mapBackendSourceToUi(
+          source,
+          previousSelectionMap.has(source.id)
+            ? previousSelectionMap.get(source.id)
+            : true
+        )
+      );
+
+      setSources(backendSources);
+
+      setNotebooks((prev) =>
+        prev.map((notebook) => {
+          if (activeNotebook && notebook.id === activeNotebook.id) {
+            return {
+              ...notebook,
+              sources: backendSources.length,
+              updated: "Just now",
+            };
+          }
+
+          return notebook;
+        })
+      );
+    } catch (error) {
+      alert(`Could not load sources: ${error.message}`);
+    }
   }
 
-  function handleCreateNotebook(newNotebook) {
-    const notebook = {
-      id: Date.now(),
-      name: newNotebook.name,
-      type: newNotebook.type,
+  useEffect(() => {
+    if (activeNotebook) {
+      loadSourcesFromBackend();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNotebook]);
+
+  function handleOpenNotebook(notebook) {
+    setActiveNotebook(notebook);
+    setMessages([welcomeMessage]);
+  }
+
+  function handleCreateNotebook(notebookData) {
+    const newNotebook = {
+      id: createId("notebook"),
+      name: notebookData.name,
+      type: notebookData.type,
       sources: 0,
       updated: "Just now",
     };
 
-    setNotebooks((prevNotebooks) => [notebook, ...prevNotebooks]);
-    setActiveNotebook(notebook);
-
-    setSources([]);
-    setMessages(starterMessages);
-    setSavedNotes(["New notebook created"]);
+    setNotebooks((prev) => [newNotebook, ...prev]);
+    setActiveNotebook(newNotebook);
+    setMessages([welcomeMessage]);
   }
 
   function handleBackToDashboard() {
     setActiveNotebook(null);
-    setPreviewSource(null);
-    setIsUploadModalOpen(false);
   }
 
-  function handleExportNotes() {
-    if (!activeNotebook) {
-      alert("Open a notebook first before exporting.");
-      return;
-    }
-
-    const sourceText = sources
-      .map((source, index) => {
-        return `${index + 1}. ${source.name} | Type: ${source.type} | Status: ${
-          source.status
-        } | Selected: ${source.selected ? "Yes" : "No"}`;
-      })
-      .join("\n");
-
-    const notesText = savedNotes
-      .map((note, index) => `${index + 1}. ${note}`)
-      .join("\n");
-
-    const chatText = messages
-      .map((message) => {
-        const speaker = message.role === "user" ? "User" : "SourceMate AI";
-        return `${speaker}: ${message.text}`;
-      })
-      .join("\n\n");
-
-    const exportContent = `
-SourceMate AI Export
-
-Notebook: ${activeNotebook.name}
-Type: ${activeNotebook.type}
-Date: ${new Date().toLocaleString()}
-
-====================
-SOURCES
-====================
-${sourceText || "No sources added yet."}
-
-====================
-SAVED NOTES
-====================
-${notesText || "No saved notes yet."}
-
-====================
-CHAT HISTORY
-====================
-${chatText || "No chat messages yet."}
-`;
-
-    const blob = new Blob([exportContent], {
-      type: "text/plain",
-    });
-
-    const fileUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = fileUrl;
-    link.download = `${activeNotebook.name.replaceAll(" ", "_")}_export.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    URL.revokeObjectURL(fileUrl);
-  }
-
-  function addAssistantMessage(text) {
-    setMessages((prevMessages) => [
-      ...prevMessages,
-      {
-        id: Date.now(),
-        role: "assistant",
-        text,
-        citations: [],
-      },
-    ]);
-  }
-
-  function toggleSource(id) {
-    setSources((prevSources) =>
-      prevSources.map((source) =>
-        source.id === id ? { ...source, selected: !source.selected } : source
+  function toggleSource(sourceId) {
+    setSources((prev) =>
+      prev.map((source) =>
+        source.id === sourceId
+          ? {
+              ...source,
+              selected: !source.selected,
+            }
+          : source
       )
     );
   }
 
-  function handleViewSource(source) {
-    setPreviewSource(source);
-  }
-
-  function handleDeleteSource(id) {
-    setSources((prevSources) =>
-      prevSources.filter((source) => source.id !== id)
-    );
-
-    if (previewSource?.id === id) {
-      setPreviewSource(null);
-    }
-
-    addAssistantMessage(
-      "Source deleted successfully. Your selected source list has been updated."
-    );
-  }
-
-  function handleFilesSelected(files) {
+  async function handleFilesSelected(files) {
     if (!files || files.length === 0) return;
-
-    const newSources = files.map((file, index) => {
-      const extension = file.name.includes(".")
-        ? file.name.split(".").pop().toUpperCase()
-        : "FILE";
-
-      return {
-        id: Date.now() + index,
-        name: file.name,
-        type: extension,
-        pages: "New",
-        status: "Ready",
-        selected: true,
-        preview: `Uploaded file: ${file.name}. Real file reading will be handled by backend later.`,
-      };
-    });
-
-    setSources((prevSources) => [...prevSources, ...newSources]);
-
-    addAssistantMessage(
-      `${files.length} new source${
-        files.length > 1 ? "s" : ""
-      } added successfully. You can now ask questions from the selected files.`
-    );
-  }
-
-  function handleAddTextSource(title, content) {
-    const newSource = {
-      id: Date.now(),
-      name: title,
-      type: "TEXT",
-      pages: "Text",
-      status: "Ready",
-      selected: true,
-      preview: content.slice(0, 160) + (content.length > 160 ? "..." : ""),
-    };
-
-    setSources((prevSources) => [...prevSources, newSource]);
-    addAssistantMessage("Text source added successfully.");
-  }
-
-  function handleAddLinkSource(url) {
-    const cleanedUrl = url.trim();
-
-    const newSource = {
-      id: Date.now(),
-      name: cleanedUrl.replace("https://", "").replace("http://", ""),
-      type: "LINK",
-      pages: "Web",
-      status: "Ready",
-      selected: true,
-      url: cleanedUrl,
-      preview: "Website link saved as a source.",
-    };
-
-    setSources((prevSources) => [...prevSources, newSource]);
-    addAssistantMessage("Link source added successfully.");
-  }
-
-  function isBadQuestion(text) {
-    const cleanedText = text.trim();
-
-    if (cleanedText.length < 2) return true;
-
-    const hasLetterOrNumber = /[a-zA-Z0-9]/.test(cleanedText);
-
-    return !hasLetterOrNumber;
-  }
-
-  function createMockAnswer(question) {
-    return {
-      id: Date.now() + 1,
-      role: "assistant",
-      text: `Based on your selected sources, here is a clear answer for: "${question}". In the final version, this response will come from your backend LLM API after reading uploaded documents.`,
-      citations: selectedSources.slice(0, 2).map((source, index) => ({
-        title: source.name,
-        page: index + 1,
-      })),
-    };
-  }
-
-  function handleSend(customPrompt) {
-    const finalText = customPrompt || input.trim();
-
-    if (!finalText || isLoading) return;
-
-    const userMessage = {
-      id: Date.now(),
-      role: "user",
-      text: finalText,
-      citations: [],
-    };
-
-    setMessages((prevMessages) => [...prevMessages, userMessage]);
-    setInput("");
-
-    if (isBadQuestion(finalText)) {
-      setTimeout(() => {
-        addAssistantMessage(
-          "Please type a proper question so I can help you better."
-        );
-      }, 300);
-      return;
-    }
-
-    if (selectedSources.length === 0) {
-      setTimeout(() => {
-        addAssistantMessage(
-          "Please select at least one source from the left panel before asking a source-based question."
-        );
-      }, 300);
-      return;
-    }
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      const aiMessage = createMockAnswer(finalText);
-      setMessages((prevMessages) => [...prevMessages, aiMessage]);
+    try {
+      for (const file of files) {
+        await uploadSourceFile(file);
+      }
+
+      await loadSourcesFromBackend();
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: createId("assistant"),
+          role: "assistant",
+          text: `${files.length} file source${
+            files.length === 1 ? "" : "s"
+          } uploaded and processed by backend.`,
+          citations: [],
+        },
+      ]);
+    } catch (error) {
+      alert(`Upload failed: ${error.message}`);
+    } finally {
       setIsLoading(false);
-    }, 900);
+    }
+  }
+
+  async function handleAddTextSource(title, content) {
+    setIsLoading(true);
+
+    try {
+      await uploadTextSource(title, content);
+      await loadSourcesFromBackend();
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: createId("assistant"),
+          role: "assistant",
+          text: "Text source added and processed by backend.",
+          citations: [],
+        },
+      ]);
+    } catch (error) {
+      alert(`Text source failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleAddLinkSource(url) {
+    setIsLoading(true);
+
+    try {
+      await uploadLinkSource(url);
+      await loadSourcesFromBackend();
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: createId("assistant"),
+          role: "assistant",
+          text: "Link source added and processed by backend.",
+          citations: [],
+        },
+      ]);
+    } catch (error) {
+      alert(`Link source failed: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handleViewSource(source) {
+    try {
+      const data = await getSourceById(source.id);
+
+      setSelectedSource({
+        ...source,
+        chunks: data.chunks || [],
+      });
+    } catch (error) {
+      alert(`Could not open source: ${error.message}`);
+    }
+  }
+
+  async function handleDeleteSource(sourceId) {
+    const confirmDelete = window.confirm(
+      "Delete this source from backend storage?"
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      await deleteSourceById(sourceId);
+      setSources((prev) => prev.filter((source) => source.id !== sourceId));
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: createId("assistant"),
+          role: "assistant",
+          text: "Source deleted from backend.",
+          citations: [],
+        },
+      ]);
+    } catch (error) {
+      alert(`Delete failed: ${error.message}`);
+    }
+  }
+
+  async function handleSend(customPrompt) {
+    const question =
+      typeof customPrompt === "string" ? customPrompt.trim() : input.trim();
+
+    if (!question || isLoading) return;
+
+    const userMessage = {
+      id: createId("user"),
+      role: "user",
+      text: question,
+      citations: [],
+    };
+
+    const assistantMessageId = createId("assistant_streaming");
+
+    const assistantMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      text: "",
+      citations: [],
+    };
+
+    setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    setInput("");
+    setIsLoading(true);
+
+    let streamedAnswer = "";
+
+    try {
+      const selectedSourceIds = selectedSources.map((source) => source.id);
+
+      await streamChatWithSources({
+        question,
+        sourceIds: selectedSourceIds,
+
+        onToken: (token) => {
+          streamedAnswer += token;
+
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    text: streamedAnswer,
+                  }
+                : message
+            )
+          );
+        },
+
+        onEnd: (payload) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    text:
+                      streamedAnswer.trim() ||
+                      "No response was generated from backend.",
+                    citations: (payload.citations || []).map((citation) => ({
+                      title: citation.sourceName || "Uploaded Source",
+                      page: citation.page || 1,
+                    })),
+                  }
+                : message
+            )
+          );
+        },
+      });
+    } catch (error) {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                text: `Backend streaming error: ${error.message}`,
+                citations: [],
+              }
+            : message
+        )
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function handleToolAction(toolId) {
+    const prompts = {
+      summary: "Summarize my selected sources in clear bullet points.",
+      questions:
+        "Create important exam-style questions and answers from my selected sources.",
+      flashcards:
+        "Create flashcards from my selected sources with question on front and answer on back.",
+    };
+
+    const prompt = prompts[toolId];
+
+    if (prompt) {
+      handleSend(prompt);
+    }
+  }
+
+  async function handleShareProject() {
+    const shareData = {
+      title: "SourceMate AI",
+      text: activeNotebook
+        ? `Check my SourceMate AI notebook: ${activeNotebook.name}`
+        : "Check my SourceMate AI project",
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+
+      await navigator.clipboard.writeText(window.location.href);
+      alert("App link copied to clipboard.");
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        alert("Share failed. Link could not be copied.");
+      }
+    }
   }
 
   function handleSaveNote(text) {
-    setSavedNotes((prevNotes) => [text.slice(0, 75) + "...", ...prevNotes]);
+    const note = {
+      id: createId("note"),
+      text,
+      createdAt: new Date().toLocaleString(),
+    };
+
+    setSavedNotes((prev) => [note, ...prev]);
   }
 
   function handleClearChat() {
-    setMessages(starterMessages);
-    setInput("");
-    setIsLoading(false);
+    setMessages([welcomeMessage]);
   }
 
-  function handleToolClick(toolTitle) {
-    if (selectedSources.length === 0) {
-      addAssistantMessage(
-        `Please select at least one source before using ${toolTitle}.`
-      );
-      return;
-    }
+  function handleExportNotes() {
+    const selectedSourceNames = selectedSources
+      .map((source) => `- ${source.name}`)
+      .join("\n");
 
-    const toolMessage = {
-      id: Date.now(),
-      role: "assistant",
-      text: `${toolTitle} generated from your selected sources. Later this button will connect to backend and generate real output from uploaded files.`,
-      citations: selectedSources.slice(0, 2).map((source, index) => ({
-        title: source.name,
-        page: index + 1,
-      })),
-    };
+    const notesText = savedNotes
+      .map((note, index) => {
+        return `Note ${index + 1}
+Created: ${note.createdAt}
+${note.text}`;
+      })
+      .join("\n\n");
 
-    setMessages((prevMessages) => [...prevMessages, toolMessage]);
-    setSavedNotes((prevNotes) => [`${toolTitle} saved`, ...prevNotes]);
+    const chatText = messages
+      .map((message) => {
+        return `${message.role.toUpperCase()}:
+${message.text}`;
+      })
+      .join("\n\n");
+
+    const exportText = `SourceMate AI Export
+
+Notebook:
+${activeNotebook ? activeNotebook.name : "Dashboard"}
+
+Selected Sources:
+${selectedSourceNames || "No selected sources"}
+
+Saved Notes:
+${notesText || "No saved notes"}
+
+Chat History:
+${chatText || "No chat messages"}
+`;
+
+    const blob = new Blob([exportText], {
+      type: "text/plain;charset=utf-8",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "sourcemate-ai-export.txt";
+    link.click();
+
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -411,6 +481,7 @@ ${chatText || "No chat messages yet."}
         activeNotebook={activeNotebook}
         handleBackToDashboard={handleBackToDashboard}
         handleExportNotes={handleExportNotes}
+        handleShareProject={handleShareProject}
       />
 
       {!activeNotebook ? (
@@ -420,48 +491,48 @@ ${chatText || "No chat messages yet."}
           handleCreateNotebook={handleCreateNotebook}
         />
       ) : (
-        <>
-          <main className="workspace">
-            <SourcesPanel
-              sources={sources}
-              toggleSource={toggleSource}
-              handleViewSource={handleViewSource}
-              handleDeleteSource={handleDeleteSource}
-              openUploadModal={() => setIsUploadModalOpen(true)}
-            />
-
-            <ChatPanel
-              selectedSources={selectedSources}
-              suggestedPrompts={suggestedPrompts}
-              messages={messages}
-              input={input}
-              setInput={setInput}
-              handleSend={handleSend}
-              handleSaveNote={handleSaveNote}
-              handleClearChat={handleClearChat}
-              isLoading={isLoading}
-            />
-
-            <ToolsPanel
-              studyTools={studyTools}
-              handleToolClick={handleToolClick}
-              savedNotes={savedNotes}
-            />
-          </main>
-
-          <SourcePreviewModal
-            source={previewSource}
-            onClose={() => setPreviewSource(null)}
+        <main className="workspace">
+          <SourcesPanel
+            sources={sources}
+            toggleSource={toggleSource}
+            handleViewSource={handleViewSource}
+            handleDeleteSource={handleDeleteSource}
+            openUploadModal={() => setIsUploadOpen(true)}
           />
 
-          <UploadModal
-            isOpen={isUploadModalOpen}
-            onClose={() => setIsUploadModalOpen(false)}
-            handleFilesSelected={handleFilesSelected}
-            handleAddTextSource={handleAddTextSource}
-            handleAddLinkSource={handleAddLinkSource}
+          <ChatPanel
+            selectedSources={selectedSources}
+            suggestedPrompts={suggestedPrompts}
+            messages={messages}
+            input={input}
+            setInput={setInput}
+            handleSend={handleSend}
+            handleSaveNote={handleSaveNote}
+            handleClearChat={handleClearChat}
+            openUploadModal={() => setIsUploadOpen(true)}
+            isLoading={isLoading}
           />
-        </>
+
+          <ToolsPanel
+            savedNotes={savedNotes}
+            handleToolAction={handleToolAction}
+          />
+        </main>
+      )}
+
+      <UploadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        handleFilesSelected={handleFilesSelected}
+        handleAddTextSource={handleAddTextSource}
+        handleAddLinkSource={handleAddLinkSource}
+      />
+
+      {selectedSource && (
+        <SourcePreviewModal
+          source={selectedSource}
+          onClose={() => setSelectedSource(null)}
+        />
       )}
     </div>
   );

@@ -1,62 +1,76 @@
-function ToolsPanel({ studyTools, handleToolClick, savedNotes }) {
+const defaultStudyTools = [
+  {
+    id: "summary",
+    title: "Generate Summary",
+    description: "Create a short summary from your selected sources.",
+    icon: "📝",
+  },
+  {
+    id: "questions",
+    title: "Important Questions",
+    description: "Generate exam-style important questions.",
+    icon: "❓",
+  },
+  {
+    id: "flashcards",
+    title: "Flashcards",
+    description: "Turn source content into quick revision cards.",
+    icon: "⚡",
+  },
+];
+
+function ToolsPanel({
+  savedNotes = [],
+  studyTools = defaultStudyTools,
+  handleToolAction = () => {},
+}) {
   return (
     <aside className="toolsPanel">
-      <div className="panelBlock">
-        <h2>Study Tools</h2>
-        <p>Generate useful outputs from your sources.</p>
+      <div className="panelHeader">
+        <div>
+          <h2>Study Tools</h2>
+          <p>Quick actions</p>
+        </div>
+      </div>
 
-        <div className="toolGrid">
-          {studyTools.map((tool) => (
-            <button
-              className="toolCard"
-              key={tool.title}
-              onClick={() => handleToolClick(tool.title)}
-            >
-              <span>{tool.icon}</span>
+      <div className="toolList">
+        {studyTools.map((tool) => (
+          <button
+            className="toolCard"
+            key={tool.id}
+            onClick={() => handleToolAction(tool.id)}
+          >
+            <div className="toolIcon">{tool.icon}</div>
+
+            <div>
               <h3>{tool.title}</h3>
               <p>{tool.description}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="panelBlock">
-        <h2>Learning Path</h2>
-
-        <div className="timeline">
-          <div>
-            <span>1</span>
-            <p>Understand Basics</p>
-          </div>
-
-          <div>
-            <span>2</span>
-            <p>Review Key Terms</p>
-          </div>
-
-          <div>
-            <span>3</span>
-            <p>Practice Questions</p>
-          </div>
-
-          <div>
-            <span>4</span>
-            <p>Final Revision</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="panelBlock">
-        <h2>Saved Notes</h2>
-
-        <div className="notesList">
-          {savedNotes.map((note, index) => (
-            <div className="noteItem" key={index}>
-              <span>🧾</span>
-              <p>{note}</p>
             </div>
-          ))}
+          </button>
+        ))}
+      </div>
+
+      <div className="notesSection">
+        <div className="notesHeader">
+          <h2>Saved Notes</h2>
+          <span>{savedNotes.length}</span>
         </div>
+
+        {savedNotes.length === 0 ? (
+          <div className="emptyNotes">
+            <p>No saved notes yet.</p>
+            <span>Save useful AI answers to see them here.</span>
+          </div>
+        ) : (
+          <div className="savedNotesList">
+            {savedNotes.map((note) => (
+              <div className="savedNoteCard" key={note.id}>
+                <p>{note.text}</p>
+                <span>{note.createdAt}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </aside>
   );

@@ -9,6 +9,7 @@ function ChatPanel({
   handleSend,
   handleSaveNote,
   handleClearChat,
+  openUploadModal,
   isLoading = false,
 }) {
   const [copiedMessageId, setCopiedMessageId] = useState(null);
@@ -143,7 +144,12 @@ function ChatPanel({
       </div>
 
       <div className="inputArea">
-        <button className="attachButton" disabled={isLoading}>
+        <button
+          className="attachButton"
+          disabled={isLoading}
+          onClick={openUploadModal}
+          title="Add source"
+        >
           ＋
         </button>
 
